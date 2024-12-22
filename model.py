@@ -110,46 +110,60 @@ class CheckersGPT(nn.Module):
 
         self.tokenizer = CustomTokenizer()
 
-    def forward(self, input, mask=None):
+    def position_encoding(self, positions, embed_size):
+        # Compute position encoding for each position and dimension
+        angle_rads = self.get_angles(
+            positions.unsqueeze(2).float(),
+            torch.arange(embed_size)[None, None,
+                                     :].float().to(positions.device),
+            embed_size
+        )
+        # Compute sine of angle for even dimensions
+        sines = torch.sin(angle_rads[:, :, 0::2])
+        # Compute cosine of angle for odd dimensions
+        cosines = torch.cos(angle_rads[:, :, 1::2])
+        # Concatenate sine and cosine values
+        pos_encoding = torch.cat([sines, cosines], dim=-1)
+        pos_encoding = pos_encoding[None, ...]
+        return pos_encoding
 
-        input_tokens, attention_mask = self.tokenizer.encode(input)
-        batch_size = 1  # TODO define with tokenizer
+    def get_angles(self, pos, i, embed_size):
+        # Compute angle rate for each position and dimension
+        angle_rates = 1 / torch.pow(10000, (2 * (i//2)) / embed_size)
+        return pos * angle_rates
 
-        token_count = len(input_tokens)  # TODO Assert ça a pas cassé
-        print(token_count)
+    def forward(self, input_tokens, mask=None):
+
+        batch_size, token_count = input_tokens.shape
+        print("batch_size, token_count", batch_size, token_count)
 
         out = self.word_embedding(input_tokens)
-        out = out.expand(
-            batch_size, *out.shape[-2:])  # Obtain word embeddings
-
-        # print(out)
-        print("out", out.shape)
 
         # Compute position encodings and add to word embeddings
         positions = torch.arange(0, token_count).expand(
             batch_size, token_count).to(input_tokens.device)
-
-        # print(positions)
-        print("pos ", positions.shape)
-        position_encoding = self.position_encoding(positions)
-
-        print(position_encoding.shape)
-        print("pos enc", position_encoding.shape)
-        # print("pos enc reshaped ",  position_encoding.reshape(out.shape))
-        out += position_encoding[:out.shape[0], :, :]
+        position_encoding = self.position_encoding(positions, self.embed_size)
+        out += position_encoding.reshape(out.shape)
 
         # Pass through each transformer block
         for layer in self.layers:
             out = layer(out)
-        print(out.shape)
+
         # Produce logits for the final token in each sequence
         out = self.fc_out(out[:, -1, :].reshape(batch_size,
                           self.embed_size)).reshape(batch_size, self.vocab_size)
+        # Apply softmax to obtain probabilities
         return torch.nn.functional.softmax(out, dim=1)
+
+    def __call__(self, input_sequences: list[str]):
+        input_tokens = self.tokenizer.encode(input_sequences)
+        output = self.forward(input_tokens)
+        return output
 
 
 if __name__ == "__main__":
     model = CheckersGPT(vocab_size=15, num_positions=400, embed_size=128,
                         num_layers=8, head_count=4)
-    test_input = "1-10,<pad>4-12,10x12<pad>"
-    print(model.forward(test_input))
+    test_input = ["1-10,<pad>4-12,10x12<eos><pad>",
+                  "1-10,<pad>14-12,8x14<eos><pad>"]
+    print(model(test_input))

@@ -57,7 +57,7 @@ class CustomTokenizer():
 
 
 if __name__ == "__main__":
-    tknzr = CustomTokenizerAlt()
+    tknzr = CustomTokenizer()
     text = "1-10,<pad>4<7>-12,10x12<eos><pad>"
     print(text)
     tokenized_text = tknzr.encode_single(text)
